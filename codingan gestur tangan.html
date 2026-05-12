@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Interaksi Partikel AI</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        .input_video {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 140px;
+            height: 105px;
+            z-index: 5;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            transform: scaleX(-1);
+            object-fit: cover;
+            background: #000;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease;
+        }
+
+        #status-box {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            backdrop-filter: blur(8px);
+            color: white;
+        }
+
+        .loader {
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid #00ffff;
+            border-radius: 50%;
+            width: 25px;
+            height: 25px;
+            animation: spin 1s linear infinite;
+            margin: 15px auto 0;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        #fullscreen-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            font-size: 14px;
+            pointer-events: auto;
+        }
+        
+        #fullscreen-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Label gestur aktif */
+        #gesture-label {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            z-index: 5;
+            text-shadow: 0 0 10px rgba(0,255,255,0.5);
+            pointer-events: none;
+        }
+
+        /* Notifikasi pesan */
+        #toast {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            background: rgba(255, 0, 0, 0.6);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 100;
+            display: none;
+            pointer-events: none;
+        }
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <button id="fullscreen-btn">LAYAR PENUH</button>
+    <div id="toast">Izin layar penuh ditolak oleh kebijakan browser.</div>
+    <div id="gesture-label"></div>
+
+    <div id="ui-layer">
+        <div id="status-box">
+            <h1 style="font-size: 20px; margin:0">Menyiapkan Pengalaman AI</h1>
+            <p style="font-size: 14px; color: #888">Mohon izinkan kamera untuk memulai</p>
+            <div class="loader"></div>
+        </div>
+    </div>
+
+    <video class="input_video" autoplay playsinline></video>
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- KONFIGURASI THREE.JS ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 40;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // --- SISTEM PARTIKEL ---
+        const particleCount = 12000;
+        const geometry = new THREE.BufferGeometry();
+        
+        const pos = new Float32Array(particleCount * 3);
+        const basePos = new Float32Array(particleCount * 3);
+        const velocities = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+
+        const heartPos = new Float32Array(particleCount * 3);
+        const cubePos = new Float32Array(particleCount * 3);
+        const diamondPos = new Float32Array(particleCount * 3);
+
+        const colorCyan = new THREE.Color(0x00ffff);
+        const colorPink = new THREE.Color(0xff1493);
+        const colorGreen = new THREE.Color(0x00ff7f);
+        const colorGold = new THREE.Color(0xffd700);
+        const colorExplosion = new THREE.Color(0xff4500);
+
+        for (let i = 0; i < particleCount; i++) {
+            const x = (Math.random() - 0.5) * 80;
+            const y = (Math.random() - 0.5) * 80;
+            const z = (Math.random() - 0.5) * 60;
+            pos[i*3] = basePos[i*3] = x;
+            pos[i*3+1] = basePos[i*3+1] = y;
+            pos[i*3+2] = basePos[i*3+2] = z;
+
+            const t = Math.random() * Math.PI * 2;
+            heartPos[i*3] = 0.8 * (16 * Math.pow(Math.sin(t), 3)) + (Math.random()-0.5)*2;
+            heartPos[i*3+1] = 0.8 * (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)) + (Math.random()-0.5)*2;
+            heartPos[i*3+2] = (Math.random()-0.5)*5;
+
+            cubePos[i*3] = (Math.random() - 0.5) * 15;
+            cubePos[i*3+1] = (Math.random() - 0.5) * 15;
+            cubePos[i*3+2] = (Math.random() - 0.5) * 15;
+
+            const dU = (Math.random() - 0.5) * 2;
+            const dV = (Math.random() - 0.5) * 2;
+            const dW = (Math.random() - 0.5) * 2;
+            const dMag = Math.abs(dU) + Math.abs(dV) + Math.abs(dW);
+            diamondPos[i*3] = (dU / dMag) * 12;
+            diamondPos[i*3+1] = (dV / dMag) * 18;
+            diamondPos[i*3+2] = (dW / dMag) * 12;
+
+            colors[i*3] = colorCyan.r;
+            colors[i*3+1] = colorCyan.g;
+            colors[i*3+2] = colorCyan.b;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const points = new THREE.Points(geometry, new THREE.PointsMaterial({
+            size: 0.18, vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.7, depthWrite: false
+        }));
+        scene.add(points);
+
+        // --- STATE & GESTUR ---
+        let handActive = false;
+        let activeGesture = 'NONE'; 
+        let wasActive = false;
+        let handPos = new THREE.Vector3();
+        const gestureLabel = document.getElementById('gesture-label');
+
+        function triggerExplosion(center) {
+            for (let i = 0; i < particleCount; i++) {
+                let idx = i * 3;
+                let dx = pos[idx] - center.x;
+                let dy = pos[idx+1] - center.y;
+                let dz = pos[idx+2] - center.z;
+                let d = Math.sqrt(dx*dx + dy*dy + dz*dz) + 0.1;
+                if (d < 40) {
+                    let f = 70 / d;
+                    velocities[idx] += (dx/d) * f * (Math.random() * 0.5 + 0.5);
+                    velocities[idx+1] += (dy/d) * f * (Math.random() * 0.5 + 0.5);
+                    velocities[idx+2] += (dz/d) * f * (Math.random() * 0.5 + 0.5);
+                    colors[idx] = colorExplosion.r; colors[idx+1] = colorExplosion.g; colors[idx+2] = colorExplosion.b;
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            points.rotation.y += 0.001;
+
+            for (let i = 0; i < particleCount; i++) {
+                let idx = i * 3;
+                let targetX, targetY, targetZ, targetColor;
+
+                if (handActive && activeGesture !== 'NONE') {
+                    if (activeGesture === 'LOVE') {
+                        targetX = heartPos[idx] + handPos.x;
+                        targetY = heartPos[idx+1] + handPos.y;
+                        targetZ = heartPos[idx+2] + handPos.z;
+                        targetColor = colorPink;
+                    } else if (activeGesture === 'CUBE') {
+                        targetX = cubePos[idx] + handPos.x;
+                        targetY = cubePos[idx+1] + handPos.y;
+                        targetZ = cubePos[idx+2] + handPos.z;
+                        targetColor = colorGreen;
+                    } else if (activeGesture === 'DIAMOND') {
+                        targetX = diamondPos[idx] + handPos.x;
+                        targetY = diamondPos[idx+1] + handPos.y;
+                        targetZ = diamondPos[idx+2] + handPos.z;
+                        targetColor = colorGold;
+                    }
+
+                    velocities[idx] += (targetX - pos[idx]) * 0.07;
+                    velocities[idx+1] += (targetY - pos[idx+1]) * 0.07;
+                    velocities[idx+2] += (targetZ - pos[idx+2]) * 0.07;
+                    colors[idx] += (targetColor.r - colors[idx]) * 0.1;
+                    colors[idx+1] += (targetColor.g - colors[idx+1]) * 0.1;
+                    colors[idx+2] += (targetColor.b - colors[idx+2]) * 0.1;
+                } else {
+                    velocities[idx] += (basePos[idx] - pos[idx]) * 0.01;
+                    velocities[idx+1] += (basePos[idx+1] - pos[idx+1]) * 0.01;
+                    velocities[idx+2] += (basePos[idx+2] - pos[idx+2]) * 0.01;
+                    colors[idx] += (colorCyan.r - colors[idx]) * 0.03;
+                    colors[idx+1] += (colorCyan.g - colors[idx+1]) * 0.03;
+                    colors[idx+2] += (colorCyan.b - colors[idx+2]) * 0.03;
+                }
+
+                velocities[idx] *= 0.88; velocities[idx+1] *= 0.88; velocities[idx+2] *= 0.88;
+                pos[idx] += velocities[idx]; pos[idx+1] += velocities[idx+1]; pos[idx+2] += velocities[idx+2];
+            }
+            geometry.attributes.position.needsUpdate = true;
+            geometry.attributes.color.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+
+        // --- LOGIKA GESTUR ---
+        function detectGestures(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                if (wasActive) triggerExplosion(handPos);
+                handActive = false; activeGesture = 'NONE'; wasActive = false;
+                gestureLabel.innerText = "";
+                return;
+            }
+
+            handActive = true;
+            const landmarks = results.multiHandLandmarks[0];
+            const center = landmarks[9];
+            handPos.set(((1.0 - center.x) - 0.5) * 60, -(center.y - 0.5) * 45, center.z * 50);
+
+            const isFingerUp = (tip, mcp) => landmarks[tip].y < landmarks[mcp].y;
+            const up = [isFingerUp(8,6), isFingerUp(12,10), isFingerUp(16,14), isFingerUp(20,18)];
+            const upCount = up.filter(v => v).length;
+
+            let currentGesture = 'NONE';
+            
+            if (results.multiHandLandmarks.length >= 2) {
+                currentGesture = 'DIAMOND';
+            } else {
+                if (upCount === 0) currentGesture = 'LOVE'; 
+                else if (upCount === 2 && up[0] && up[1]) currentGesture = 'CUBE'; 
+                else currentGesture = 'NONE'; 
+            }
+
+            if (currentGesture === 'NONE' && wasActive) {
+                triggerExplosion(handPos);
+            }
+
+            activeGesture = currentGesture;
+            wasActive = (currentGesture !== 'NONE');
+            
+            if(activeGesture === 'LOVE') gestureLabel.innerText = "❤️ Love (Kepal)";
+            else if(activeGesture === 'CUBE') gestureLabel.innerText = "🧊 Kubus (Peace)";
+            else if(activeGesture === 'DIAMOND') gestureLabel.innerText = "💎 Diamond (Salam)";
+            else gestureLabel.innerText = "";
+        }
+
+        // --- INISIALISASI ---
+        const videoElement = document.querySelector('.input_video');
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        hands.onResults((res) => {
+            if (document.getElementById('ui-layer')) {
+                document.getElementById('ui-layer').style.opacity = '0';
+                setTimeout(() => document.getElementById('ui-layer')?.remove(), 500);
+            }
+            detectGestures(res);
+        });
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+        cameraUtils.start();
+
+        // --- FULLSCREEN FIX ---
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const toast = document.getElementById('toast');
+
+        fullscreenBtn.addEventListener('click', () => {
+            try {
+                if (!document.fullscreenElement) {
+                    const promise = document.documentElement.requestFullscreen();
+                    if (promise !== undefined) {
+                        promise.catch(err => {
+                            console.warn("Fullscreen error handled:", err);
+                            showToast();
+                        });
+                    }
+                } else {
+                    document.exitFullscreen();
+                }
+            } catch (e) {
+                console.error("Fullscreen logic failed:", e);
+                showToast();
+            }
+        });
+
+        function showToast() {
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 3000);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
